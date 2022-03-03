@@ -1,13 +1,13 @@
 //固定パラメータ
-const NUM_LOOP = 10000;//シミュレーション施行回数
-const YEARS = 5;
-const DO_REBALANCE = false;//リバランスをするか？
-const INCOME = 25;//入金額
-const FIRST_CHART_PRICE = 100;//騰落率計算用なので何でも良い
+const NUM_LOOP = 1;//シミュレーション施行回数
+const YEARS = 1/3;
+const INCOME = 30;//入金額
 const PERIOD = 360 * YEARS;
 const NUM_PERIODS = 3;//上下上など3段階で値が大きく動く
-const REBALANCE_INTERVAL = 30*12;//リバランスを実施する間隔(単位は日)
-const INVEST_LIMIT = REBALANCE_INTERVAL//リバランスで安全資産が減る額の上限
+const REBALANCE_INTERVAL = 30;//リバランスを実施する間隔(単位は日)
+const DO_REBALANCE = true;//リバランスはやらない方が良い
+const ICASH = 0;//assets[0]は必ず現金にする。
+const FIRST_CHART_PRICE = 1;//変更不可!
 
 /**
  * シミュレーション用の株価を取得。
@@ -49,7 +49,7 @@ const getGrowthRate = (current, first) => {
 }
 
 /**
- * 比率に応じて資産を分割する。
+ * 単純な比率に応じて資産を分割する。
  * 
  * @param  {Array} assets assetオブジェクトの配列
  * @return {Array} 新しい配分の配列
@@ -63,31 +63,61 @@ const divideAssets = (assets, dealAmount) => {
 }
 
 /**
+ * 時価総額と比率に応じて資産を分割する。
+ * 
+ * @param  {Array} assets assetオブジェクトの配列
+ * @return {Array} 新しい配分の配列
+ */
+ const rebalanceAssets = (assets) => {
+     //資産を時価総額に変更。
+    const values = assets.map((asset) => {
+        return asset.amount * asset.lastChartPrice;
+    })
+
+    //全資産の時価総額を求める。
+    let dealAmount = values.reduce((sum, val) => {
+        return sum + val;
+    });
+
+    //時価総額で配分する。
+    const newValues = divideAssets(assets, dealAmount);
+
+    //新しい口数を求める。
+    const newBalances = assets.map((asset, i) => {
+        return newValues[i] / asset.lastChartPrice;
+    });
+    return newBalances;
+}
+
+/**
  * 資産配分を実行する。
  * 
  * @param  {Array} assets assetオブジェクトの配列
  * @return {Array} 売買履歴の配列。
  */
 const rebalance = (assets) => {
-    //今月の投資資金(全資産合計)
-    let dealAmount = 0;
-    assets.forEach((asset, i) => {
-        dealAmount += asset.amount;
-    });
+    //時価総額ベースで資産配分する。
+    const balances = rebalanceAssets(assets);
 
-    //まず最初にリバランス。
-    let balances = divideAssets(assets, dealAmount);
-
-    //資産を売買する(amountが負の場合は売り)
+    //現金残高がマイナスでない場合は資産配分を実行する。
     const history = [];
-    assets.forEach((asset, i) => {
-        let diff = balances[i] - asset.amount;
-        assets[i].amount = balances[i];
-        history.push(`${Math.round(assets[i].lastChartPrice)}/${Math.round(diff)}/${Math.round(assets[i].amount)}`)
-    });
-
+    if (balances[ICASH] >= 0) {
+        balances.forEach((bal, i) => {
+            const diff = Math.round(bal - assets[i].amount);
+            assets[i].amount = bal;
+            //デバッグ用
+            const value = Math.round(assets[i].lastChartPrice *　assets[i].amount);
+            const lastChartPrice = Math.round(assets[i].lastChartPrice);
+            const amount = Math.round(assets[i].amount);
+            history.push(`${diff>0?'+':''}${diff}|${lastChartPrice}*${amount}=${value}`);
+        });
+    }
+    else {
+        console.log('現金不足でリバランスできません！')
+    }
     return history;
 }
+
 
 /**
  * Assetオブジェクトの定義
@@ -110,32 +140,33 @@ const createAsset = (label, balance, updown=0, volatility=10, positive=true) => 
         amount: 0,
         firstChartPrice: FIRST_CHART_PRICE,
         lastChartPrice: FIRST_CHART_PRICE,
-        investHistory: [],
-        chartPriceHistory: [],
     };
 }
 
 const runShortSimulation = (days, assets, interval, keikiHosei) => {
     for (let day=0; day<days; day++) {
-        //各々の騰落率に応じて資産を増減させる。
+        //各々の騰落率に応じて株価を増減させる。
         assets.forEach((asset, i) => {
-            let rate = getUpdownRate(keikiHosei, asset.updown, asset.volatility, asset.positive) / 100 + 1;
-            assets[i].amount = assets[i].amount * rate;
+            const rate = getUpdownRate(keikiHosei, asset.updown, asset.volatility, asset.positive) / 100 + 1;
             assets[i].lastChartPrice = assets[i].lastChartPrice * rate;
         });
+        assets[ICASH].lastChartPrice = FIRST_CHART_PRICE;//冗長だが一応
 
         //毎月の収入で比率に応じて資産を積み立てる。
         if (day % 30 === 0) {
-            const balances = divideAssets(assets, INCOME);
-            assets.forEach((asset, i) => {
-                assets[i].amount += balances[i];
+            //収入を比率で分割。
+            const divs = divideAssets(assets, INCOME);
+
+            //時価総額に応じた口数に変更する。
+            const nums = divs.map((div, i) => div / assets[i].lastChartPrice);
+
+            //assetsに購入した口数を反映する。
+            nums.forEach((num, i) => {
+                assets[i].amount += num
             });
             if (NUM_LOOP === 1) {
-                const arr = [];
-                assets.forEach((asset, i) => {
-                    arr.push(`#${Math.round(assets[i].lastChartPrice)}/${Math.round(balances[i])}/${Math.round(assets[i].amount)}`)
-                });
-                console.log(arr);
+                console.log(nums)
+                //console.log(nums.map((num, i) => num));
             }
         }
 
@@ -144,7 +175,6 @@ const runShortSimulation = (days, assets, interval, keikiHosei) => {
             if (DO_REBALANCE) {
                 const history = rebalance(assets);
                 if (NUM_LOOP === 1) {
-                    console.log(day);
                     console.log(history);
                 }
             }
@@ -187,9 +217,12 @@ const runMultipulSimulation = (economyChart, balances) => {
 }
 
 const createAssets = (balances=null) => {
+    //必ずassets[ICASH]が現金になるようにしてください。
     const assets = [
-        createAsset('株式', 0, 7, 10, true),
-        createAsset('逆相関', 0, 7, 10, false),
+        createAsset('現金', 0, 0, 1, false),//変更禁止(ICASH)
+        createAsset('株式', 0, 10, 100, true),
+        //createAsset('逆相関株式', 0, 7, 10, false),
+        createAsset('債権', 0, 10, 100, true),
     ];
     if (Array.isArray(balances)) {
         balances.forEach((bal, i) => {
@@ -215,41 +248,34 @@ const printTitle = () => {
 }
 
 const runSimulation = () => {
+    const DEBUGHOSEI = 0.01
     //景気チャート
-    const P = +0.008;
+    const P = +0.008 ;
     const M = -0.008;
+    const X = -0.01;
     const economyCharts = [
-        {K:"下上上", V:[M,P,P]},
-        {K:"上下上", V:[P,M,P]},
-        {K:"上上下", V:[P,P,M]},
-        {K:"下下上", V:[M,M,P]},
-        {K:"下上下", V:[M,P,M]},
-        {K:"上下下", V:[P,M,M]},
+        {K:"TEST", V:[X,X,X]},
+        // {K:"下上上", V:[M,P,P]},
+        // {K:"上下上", V:[P,M,P]},
+        // {K:"上上下", V:[P,P,M]},
+        // {K:"下下上", V:[M,M,P]},
+        // {K:"下上下", V:[M,P,M]},
+        // {K:"上下下", V:[P,M,M]},
     ];
 
     //資産配分のパターン
     const balancePattern = [
-        [10,0],
-        [5,5],
-        [0,10],
+        [0,5,5],
     ];
 
-    let strRebalance = 'リバランス無し';
-    if (DO_REBALANCE) {
-        if (REBALANCE_INTERVAL === 360) {
-            strRebalance = '毎年リバランス';
-        } else {
-            strRebalance = REBALANCE_INTERVAL + '日おきにリバランス';
-        }
-    }
-    console.log(`毎月${INCOME}円入金：期間${YEARS*3}年：${strRebalance}：試行${NUM_LOOP}回`)
+    console.log(`期間${YEARS*3}年：入金額${getTotalIncome()}円(月${INCOME}円)：リバランス頻度${REBALANCE_INTERVAL}日：試行${NUM_LOOP}回：`)
 
     //全体の処理を行うループ処理。
     balancePattern.forEach((balances, i) => {
         if (i ===0 || true) {
             printTitle();
         }
-        const allSummary = createSummary("全平均", balances);
+        const allSummary = createSummary("期待値", balances);
         economyCharts.forEach((economyChart) => {
             const subSummary = runMultipulSimulation(economyChart, balances);
             allSummary.total += subSummary.total;

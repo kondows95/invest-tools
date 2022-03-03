@@ -1,6 +1,7 @@
 //固定パラメータ
 const NUM_LOOP = 10000;//シミュレーション施行回数
 const YEARS = 5;
+const DO_REBALANCE = false;//リバランスをするか？
 const INCOME = 25;//入金額
 const FIRST_CHART_PRICE = 100;//騰落率計算用なので何でも良い
 const PERIOD = 360 * YEARS;
@@ -140,10 +141,12 @@ const runShortSimulation = (days, assets, interval, keikiHosei) => {
 
         //一定期間毎にリバランスを実行。
         if (day !== 0 && (day % interval === 0 || day === days-1)) {
-            const history = rebalance(assets);
-            if (NUM_LOOP === 1) {
-                console.log(day);
-                console.log(history);
+            if (DO_REBALANCE) {
+                const history = rebalance(assets);
+                if (NUM_LOOP === 1) {
+                    console.log(day);
+                    console.log(history);
+                }
             }
         }
     }
@@ -185,8 +188,8 @@ const runMultipulSimulation = (economyChart, balances) => {
 
 const createAssets = (balances=null) => {
     const assets = [
-        createAsset('株式1', 0, 6, 10, true),
-        createAsset('逆相関2', 0, 6, 10, false),
+        createAsset('株式', 0, 7, 10, true),
+        createAsset('逆相関', 0, 7, 10, false),
     ];
     if (Array.isArray(balances)) {
         balances.forEach((bal, i) => {
@@ -213,18 +216,15 @@ const printTitle = () => {
 
 const runSimulation = () => {
     //景気チャート
-    const P = +0.0024;
-    const M = -0.0024;
+    const P = +0.008;
+    const M = -0.008;
     const economyCharts = [
-
-        {K:"上上上", V:[P,P,P]},
         {K:"下上上", V:[M,P,P]},
         {K:"上下上", V:[P,M,P]},
         {K:"上上下", V:[P,P,M]},
         {K:"下下上", V:[M,M,P]},
         {K:"下上下", V:[M,P,M]},
         {K:"上下下", V:[P,M,M]},
-        {K:"下下下", V:[M,M,M]},
     ];
 
     //資産配分のパターン
@@ -234,7 +234,15 @@ const runSimulation = () => {
         [0,10],
     ];
 
-    console.log(`毎月${INCOME}円入金：期間${YEARS*3}年：毎年リバランス：試行${NUM_LOOP}回`)
+    let strRebalance = 'リバランス無し';
+    if (DO_REBALANCE) {
+        if (REBALANCE_INTERVAL === 360) {
+            strRebalance = '毎年リバランス';
+        } else {
+            strRebalance = REBALANCE_INTERVAL + '日おきにリバランス';
+        }
+    }
+    console.log(`毎月${INCOME}円入金：期間${YEARS*3}年：${strRebalance}：試行${NUM_LOOP}回`)
 
     //全体の処理を行うループ処理。
     balancePattern.forEach((balances, i) => {
